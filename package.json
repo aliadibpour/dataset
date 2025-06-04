@@ -1,0 +1,19 @@
+{
+  "name": "dataset",
+  "version": "1.0.0",
+  "main": "index.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "type": "module",
+  "author": "",
+  "license": "ISC",
+  "description": "",
+  "dependencies": {
+    "dotenv": "^16.5.0",
+    "express": "^5.1.0",
+    "fs": "^0.0.1-security",
+    "prebuilt-tdlib": "^0.1008046.0",
+    "tdl": "^8.0.2"
+  }
+}
