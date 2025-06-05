@@ -2,15 +2,21 @@ import express from 'express';
 import * as tdl from 'tdl';
 import { getTdjson } from 'prebuilt-tdlib';
 import fs from 'fs';
-import readline from 'readline';
 import dotenv from 'dotenv';
+import AppDataSource from './data-source.js';
+
+// Initialize TypeORM data source
+let messageRepo;
+AppDataSource.initialize().then(async () => {
+  messageRepo = AppDataSource.getRepository("Chat");
+});
 
 dotenv.config();
 
 const app = express();
 const PORT = 3000;
 const SAVE_PATH = './saved_messages.json';
-const CHANNEL_USERNAME = '@perspolisfans'; // 👈 change this to your channel username
+const CHANNEL_USERNAME = 'varzesh3'; // 👈 change this to your channel username
 
 // // Initialize TDLib
 tdl.configure({
@@ -88,13 +94,26 @@ async function fetchLastMessages(chatId) {
 
 // Watch for new messages
 function listenToMessages(chatId) {
-  client.on('update', (update) => {
+  client.on('update', async(update) => {
     if (update._ === 'updateNewMessage') {
       const message = update.message;
       if (message.chat_id === chatId) {
         console.log('🆕 New message:', message.content?.text?.text || '[non-text]');
         saveMessageId(message.id);
+
+        
+        try {
+           await messageRepo.save({
+             id: message.id,
+             title: "From Telegram",
+           });
+           console.log(`✅ Message ${message.id} saved to database.`);
+         } catch (error) {
+           console.error('❌ DB Save Error:', error.message);
+         }
       }
+
+
     }
   });
 }

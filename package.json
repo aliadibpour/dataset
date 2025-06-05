@@ -13,7 +13,10 @@
     "dotenv": "^16.5.0",
     "express": "^5.1.0",
     "fs": "^0.0.1-security",
+    "pg": "^8.16.0",
     "prebuilt-tdlib": "^0.1008046.0",
-    "tdl": "^8.0.2"
+    "reflect-metadata": "^0.2.2",
+    "tdl": "^8.0.2",
+    "typeorm": "^0.3.24"
   }
 }
