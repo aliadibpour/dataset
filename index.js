@@ -16,7 +16,7 @@ dotenv.config();
 const app = express();
 const PORT = 3000;
 const SAVE_PATH = './saved_messages.json';
-const CHANNEL_USERNAME = 'varzesh3'; // 👈 change this to your channel username
+const CHANNEL_USERNAME = 'varzesh3';
 
 // // Initialize TDLib
 tdl.configure({
