@@ -1,142 +1,141 @@
 import express from 'express';
 import * as tdl from 'tdl';
 import { getTdjson } from 'prebuilt-tdlib';
-import fs from 'fs';
 import dotenv from 'dotenv';
 import AppDataSource from './data-source.js';
 
-// Initialize TypeORM data source
-let messageRepo;
-AppDataSource.initialize().then(async () => {
-  messageRepo = AppDataSource.getRepository("Chat");
-});
-
 dotenv.config();
-
 const app = express();
 const PORT = 3000;
-const SAVE_PATH = './saved_messages.json';
-const CHANNEL_USERNAME = 'varzesh3';
 
-// // Initialize TDLib
-tdl.configure({
-  tdjson: getTdjson(),
-  verbosityLevel: 1,
+const CHANNELS = [
+  'Esteghlaal_twitter',
+  'bad_ss',
+  'Perspolisirfans',
+  'Barca_We',
+  'Tans_Footbali',
+];
+
+let chatRepo;
+await AppDataSource.initialize().then(() => {
+  chatRepo = AppDataSource.getRepository('Chat');
 });
 
+tdl.configure({ tdjson: getTdjson(), verbosityLevel: 1 });
 
 const client = tdl.createClient({
-  apiId: 19661737,
-  apiHash: "28b0dd4e86b027fd9a2905d6c343c6bb",
+  apiId: parseInt(process.env.API_ID),
+  apiHash: process.env.API_HASH,
 });
+await client.login();
+console.log('🔐 Authenticated');
 
-const authState = await client.invoke({
-  _: 'getAuthorizationState'
-})
-if (authState._ !== "authorizationStateReady") {
-  client.login()
+function calcScore({ views = 0, forwards = 0, replies = 0, canInteract = true }) {
+  if (!canInteract) return forwards * 0.6 + views * 0.4;
+  return views * 0.2 + forwards * 0.3 + replies * 0.5;
 }
 
-
-console.log('🔐 Current auth state:', authState)
-
-
-
-// Store message ID if not already stored
-function saveMessageId(messageId) {
-  let data = [];
-  if (fs.existsSync(SAVE_PATH)) {
-    try {
-      data = JSON.parse(fs.readFileSync(SAVE_PATH, 'utf-8'));
-    } catch {
-      data = [];
-    }
-  }
-  if (!data.includes(messageId)) {
-    data.push(messageId);
-    fs.writeFileSync(SAVE_PATH, JSON.stringify(data, null, 2));
-    console.log(`💾 Saved message ID: ${messageId}`);
-  }
-}
-
-// Get chat ID using channel username
-async function getChatIdByUsername(username) {
+async function getChatId(username) {
   try {
-    const chat = await client.invoke({ _: 'searchPublicChat', username: username.replace('@', '') });
-    console.log(`📡 Chat found: ${chat.title}`);
+    const chat = await client.invoke({ _: 'searchPublicChat', username });
     return chat.id;
-  } catch (err) {
-    console.error('❌ Failed to find chat:', err.message);
-    process.exit(1);
+  } catch (e) {
+    console.error(`❌ Chat ${username} not found:`, e.message);
+    return null;
   }
 }
 
-// Fetch last 10 messages
-async function fetchLastMessages(chatId) {
+async function fetchRecentMessages(chatId, limit = 50) {
+  const history = await client.invoke({
+    _: 'getChatHistory',
+    chat_id: chatId,
+    limit,
+    offset_id: 0,
+    offset_position: 0,
+    only_local: false,
+  });
+
+  const now = Date.now() / 1000;
+  const twoHoursAgo = now - 2 * 60 * 60;
+
+  return (history.messages || []).filter((m) => m.date > twoHoursAgo);
+}
+
+async function enrichMessage(chatId, message) {
   try {
-    const result = await client.invoke({
-      _: 'getChatHistory',
+    const full = await client.invoke({
+      _: 'getMessage',
       chat_id: chatId,
-      limit: 10,
-      offset_id: 0,
-      offset_position: 0,
-      only_local: false,
+      message_id: message.id,
     });
 
-    for (const message of result.messages) {
-      console.log('📥 Message:', message.content?.text?.text || '[non-text]');
-      saveMessageId(message.id);
-    }
-  } catch (err) {
-    console.error('⚠️ Error fetching messages:', err.message);
+    const replies = full.reply_info?.reply_count || 0;
+    const views = full.view_count || 0;
+    const forwards = full.forward_info ? 1 : 0;
+    const canInteract = !message.can_be_reported;
+
+    const score = calcScore({ views, forwards, replies, canInteract });
+
+    return {
+      chatId: String(chatId),
+      messageId: String(message.id),
+      score,
+    };
+  } catch (e) {
+    console.error(`❌ Failed to enrich message:`, e.message);
+    return null;
   }
 }
 
-// Watch for new messages
-function listenToMessages(chatId) {
-  client.on('update', async(update) => {
-    if (update._ === 'updateNewMessage') {
-      const message = update.message;
-      if (message.chat_id === chatId) {
-        console.log('🆕 New message:', message.content?.text?.text || '[non-text]');
-        saveMessageId(message.id);
+// 📡 GET /best
+app.get('/best', async (req, res) => {
+  console.log('🔍 Fetching top 10 messages from each channel (last 2h)...');
 
-        
-        try {
-           await messageRepo.save({
-             id: message.id,
-             title: "From Telegram",
-           });
-           console.log(`✅ Message ${message.id} saved to database.`);
-         } catch (error) {
-           console.error('❌ DB Save Error:', error.message);
-         }
-      }
+  // مرحله 1: پاک‌سازی قبلی
+  await chatRepo.clear();
 
+  // مرحله 2: گرفتن پیام‌های برتر برای هر کانال
+  const topMessagesPerChannel = [];
 
-    }
-  });
-}
+  for (const username of CHANNELS) {
+    const chatId = await getChatId(username);
+    if (!chatId) continue;
 
-// Setup messages API
-app.get('/messages', (req, res) => {
-  if (fs.existsSync(SAVE_PATH)) {
-    const data = JSON.parse(fs.readFileSync(SAVE_PATH, 'utf-8'));
-    res.json(data);
-  } else {
-    res.json([]);
+    const recentMessages = await fetchRecentMessages(chatId, 50);
+    const enriched = await Promise.all(
+      recentMessages.map((msg) => enrichMessage(chatId, msg))
+    );
+
+    const valid = enriched.filter(Boolean);
+    valid.sort((a, b) => b.score - a.score);
+
+    const top10 = valid.slice(0, 10);
+    topMessagesPerChannel.push(...top10);
+    console.log(`✅ ${username}: ${top10.length} top messages`);
   }
+
+  // مرحله 3: میکس رندوم
+  const shuffled = topMessagesPerChannel
+    .map((msg) => ({ ...msg, rand: Math.random() }))
+    .sort((a, b) => a.rand - b.rand)
+    .map(({ rand, ...msg }) => msg); // حذف rand
+
+  // مرحله 4: ذخیره در دیتابیس
+  for (const msg of shuffled) {
+    try {
+      await chatRepo.save({
+        chatId: msg.chatId,
+        messageId: msg.messageId,
+      });
+    } catch (e) {
+      console.error(`❌ DB save failed:`, e.message);
+    }
+  }
+
+  // مرحله 5: ارسال فقط آیدی‌ها
+  res.json(shuffled.map(({ chatId, messageId }) => ({ chatId, messageId })));
 });
 
-const main = async () => {
-    const chatId = await getChatIdByUsername(CHANNEL_USERNAME);
-    await fetchLastMessages(chatId);
-    listenToMessages(chatId);
-}
-main()
-
-
-
 app.listen(PORT, () => {
-  console.log(`🚀 Server ready at http://localhost:${PORT}`);
+  console.log(`🚀 Server running at http://localhost:${PORT}`);
 });

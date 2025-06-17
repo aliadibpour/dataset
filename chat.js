@@ -4,12 +4,13 @@ const chatEntity = new EntitySchema({
   name: "Chat",
   tableName: "chats",
   columns: {
-    id: {
+    messageId: {
       type: String,
       primary: true,
     },
-    title: {
+    chatId: {
       type: String,
+      nullable: false,
     },
   },
 });
